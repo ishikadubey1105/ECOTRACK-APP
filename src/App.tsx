@@ -10,7 +10,8 @@ import {
   BookOpen, Bell, Clock, Share2, Copy, X, Heart
 } from 'lucide-react';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Cell
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Cell,
+  LineChart, Line, ReferenceLine
 } from 'recharts';
 import { playGamificationSound } from './utils/audio';
 import {
@@ -978,6 +979,48 @@ export default function App() {
       list.push(totalsObj);
     }
     return list;
+  }, [logs]);
+
+  // Carbon Trend Analysis dataset calculation
+  const trendChartData = useMemo(() => {
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const list = [];
+    const now = Date.now();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    
+    // Previous Week's average daily footprint (days 8 to 14 ago)
+    const previousWeekLogs = logs.filter(
+      l => l.timestamp >= now - 14 * oneDayMs && l.timestamp < now - 7 * oneDayMs
+    );
+    const previousWeekTotal = previousWeekLogs.reduce((sum, l) => sum + l.co2eKg, 0);
+    const prevWeekDailyAverage = Number((previousWeekTotal / 7).toFixed(2));
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const label = `${dayLabels[d.getDay()]} ${d.getDate()}`;
+      
+      const dayLogs = logs.filter(log => new Date(log.timestamp).toISOString().split('T')[0] === dateStr);
+      const currentDayTotal = Number(dayLogs.reduce((sum, log) => sum + log.co2eKg, 0).toFixed(2));
+      
+      list.push({
+        name: label,
+        'Current Week': currentDayTotal,
+        'Prev Week Avg': prevWeekDailyAverage,
+      });
+    }
+    
+    const currentWeekLogs = logs.filter(l => l.timestamp >= now - 7 * oneDayMs);
+    const currentWeekTotal = Number(currentWeekLogs.reduce((sum, l) => sum + l.co2eKg, 0).toFixed(2));
+    const currentWeekDailyAverage = Number((currentWeekTotal / 7).toFixed(2));
+    
+    return {
+      list,
+      prevWeekDailyAverage,
+      currentWeekTotal,
+      currentWeekDailyAverage,
+    };
   }, [logs]);
 
   // Interactive What-if slider estimation calculations
@@ -2186,6 +2229,134 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
               className="w-full accent-emerald-500 cursor-pointer h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full border-none"
             />
             <span className="text-sm font-extrabold text-emerald-800 dark:text-emerald-400 shrink-0">{weeklyGoal} kg/week</span>
+          </div>
+        </div>
+
+        {/* CARBON TREND ANALYSIS CHART */}
+        <div className="bg-white dark:bg-zinc-900 border border-emerald-100 dark:border-zinc-800 p-6 sm:p-8 rounded-3xl shadow-sm space-y-6">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800 pb-4">
+            <div>
+              <div className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-zinc-950 border border-emerald-100/50 dark:border-zinc-800 py-1 px-3 rounded-full text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-400 mb-2">
+                <TrendingDown className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Performance Indicator</span>
+              </div>
+              <h3 className="text-xl font-black font-serif text-emerald-950 dark:text-zinc-50">
+                Carbon Trend Analysis
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Daily carbon footprint progress for the current week compared to your previous week's average daily baseline.
+              </p>
+            </div>
+
+            {/* Quick trend indicator badge */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/80 text-center">
+                <span className="block text-[9px] font-mono tracking-widest text-zinc-400 uppercase font-black">PREV WEEK DAILY AVG</span>
+                <span className="text-base font-black text-amber-600 dark:text-amber-400">
+                  {trendChartData.prevWeekDailyAverage} kg
+                </span>
+              </div>
+              <div className="bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/80 text-center">
+                <span className="block text-[9px] font-mono tracking-widest text-zinc-400 uppercase font-black">THIS WEEK DAILY AVG</span>
+                <span className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                  {trendChartData.currentWeekDailyAverage} kg
+                </span>
+              </div>
+              <div className="bg-zinc-50 dark:bg-zinc-950 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800/80 text-center flex flex-col justify-center min-w-[100px]">
+                <span className="block text-[9px] font-mono tracking-widest text-zinc-400 uppercase font-black">TREND RATIO</span>
+                <span className="text-sm font-black flex items-center justify-center gap-1">
+                  {trendChartData.prevWeekDailyAverage === 0 ? (
+                    <span className="text-zinc-500">N/A</span>
+                  ) : (
+                    (() => {
+                      const percentChange = ((trendChartData.currentWeekDailyAverage - trendChartData.prevWeekDailyAverage) / trendChartData.prevWeekDailyAverage) * 100;
+                      const isReduction = percentChange <= 0;
+                      return (
+                        <span className={`flex items-center gap-0.5 ${isReduction ? 'text-emerald-600' : 'text-rose-500'}`}>
+                          {isReduction ? '↓' : '↑'} {Math.abs(Math.round(percentChange))}%
+                        </span>
+                      );
+                    })()
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-8 h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendChartData.list} margin={{ top: 15, right: 15, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#27272a' : '#f4fbf7'} />
+                  <XAxis dataKey="name" stroke="#889b89" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#889b89" fontSize={10} tickLine={false} unit="kg" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: isDarkMode ? '#18181b' : '#ffffff',
+                      borderRadius: '16px',
+                      border: isDarkMode ? '1px solid #27272a' : '1px solid #d6e4d6',
+                      fontSize: '11px',
+                    }}
+                  />
+                  <Legend verticalAlign="top" iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '10px', paddingBottom: '15px' }} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="Current Week" 
+                    stroke="#10b981" 
+                    strokeWidth={3} 
+                    dot={{ fill: '#10b981', r: 4 }} 
+                    activeDot={{ r: 6 }} 
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="Prev Week Avg" 
+                    stroke="#f59e0b" 
+                    strokeWidth={2} 
+                    strokeDasharray="5 5" 
+                    dot={false} 
+                    activeDot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="lg:col-span-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800/80 rounded-2xl p-5 flex flex-col justify-between space-y-4">
+              <div className="space-y-2">
+                <span className="text-[10px] font-mono tracking-widest text-[#10b981] font-black uppercase">Trend Insights</span>
+                <h4 className="text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
+                  {trendChartData.prevWeekDailyAverage === 0 ? (
+                    "Establish a baseline"
+                  ) : trendChartData.currentWeekDailyAverage < trendChartData.prevWeekDailyAverage ? (
+                    "Eco Footprint is Shrinking! 🎉"
+                  ) : (
+                    "Footprint is Expanding ⚠️"
+                  )}
+                </h4>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  {trendChartData.prevWeekDailyAverage === 0 ? (
+                    "Keep logging daily to create a multi-week data trend. Once previous week data accumulates, you'll see comparative trend percentages."
+                  ) : trendChartData.currentWeekDailyAverage < trendChartData.prevWeekDailyAverage ? (
+                    `Amazing work! Your daily emission intensity is lower than last week's average by ${Math.round(((trendChartData.prevWeekDailyAverage - trendChartData.currentWeekDailyAverage) / trendChartData.prevWeekDailyAverage) * 100)}%. Keep choosing active transit and plant-based foods to maintain your standing!`
+                  ) : (
+                    `Your current footprint rate is higher than last week's average. Consider logging alternative transit or diet choices to reduce your score and rebuild avoided credits!`
+                  )}
+                </p>
+              </div>
+
+              {/* Weekly saving equivalent visual card */}
+              <div className="pt-3.5 border-t border-zinc-200/50 dark:border-zinc-800/80 text-[11px] text-zinc-500 dark:text-zinc-400">
+                <div className="flex justify-between py-1">
+                  <span>Current Week footprint:</span>
+                  <span className="font-extrabold text-zinc-900 dark:text-white">{trendChartData.currentWeekTotal} kg CO₂e</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span>Equivalent standard days:</span>
+                  <span className="font-extrabold text-[#10b981]">
+                    {Math.round(trendChartData.currentWeekTotal / 12)} Daily Targets
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
