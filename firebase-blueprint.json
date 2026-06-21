@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Cross-device user profile containing gamification score and budget configuration",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner unique ID" },
+        "email": { "type": "string", "description": "Registered email statement address" },
+        "displayName": { "type": "string", "description": "Selected profile moniker" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "xp": { "type": "integer", "description": "Current gamification experience points score" },
+        "level": { "type": "integer", "description": "Current level ranking" },
+        "carbonGoal": { "type": "number", "description": "Active budget cap limit" },
+        "badges": { "type": "array", "description": "Monikers of badges attained safely" }
+      },
+      "required": ["uid", "email", "xp", "level"]
+    },
+    "CarbonLog": {
+      "title": "Carbon Activity Log",
+      "description": "Individual ecological footprint entry recorded on the dashboard",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique log transaction identifier" },
+        "uid": { "type": "string", "description": "Owner user context identifier" },
+        "timestamp": { "type": "integer", "description": "Epoch millisecond value of this statement" },
+        "description": { "type": "string", "description": "Human explanation of the action logged" },
+        "category": { "type": "string", "enum": ["transport", "food", "energy", "shopping"] },
+        "co2eKg": { "type": "number", "description": "Calculated value in kg of Carbon dioxide equivalent" },
+        "source": { "type": "string", "enum": ["manual", "quickadd", "choice"] },
+        "range": { "type": "string", "description": "Uncertainty limit estimate tag" },
+        "reasoning": { "type": "string", "description": "Why the calculation factor is accurate" },
+        "avoidedKg": { "type": "number", "description": "Swapped carbon savings value achieved" }
+      },
+      "required": ["id", "uid", "timestamp", "description", "category", "co2eKg", "source"]
+    },
+    "UserChallenge": {
+      "title": "Enrolled Challenge",
+      "description": "Interactive green action pledge enrollment checklist item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "challengeId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "enrolledAt": { "type": "string" },
+        "completedAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "challengeId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Secure profile path for individual verified users"
+    },
+    "/carbonLogs/{logId}": {
+      "schema": "CarbonLog",
+      "description": "Footprint history ledger entries filtered for owner query visibility"
+    },
+    "/userChallenges/{ucId}": {
+      "schema": "UserChallenge",
+      "description": "Active state track of accepted ecological challenges"
+    }
+  }
+}

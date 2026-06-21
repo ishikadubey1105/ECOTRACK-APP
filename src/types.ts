@@ -68,3 +68,57 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
 }
+
+export interface ActivityLog {
+  id: string;
+  timestamp: number;
+  description: string;
+  category: 'transport' | 'food' | 'energy' | 'shopping';
+  co2eKg: number;
+  source: 'manual' | 'quickadd' | 'choice';
+  range?: string;
+  reasoning?: string;
+  avoidedKg?: number;
+}
+
+export interface AiTip {
+  title: string;
+  tip: string;
+  whyMatters: string;
+  estimatedSavings: number;
+}
+
+export interface ActiveChallenge {
+  id: string;
+  title: string;
+  tip: string;
+  targetCount: number;
+  currentCount: number;
+  savingsPerAction: number;
+  xpReward: number;
+  category: string;
+}
+
+export interface CountryBenchmark {
+  country: string;
+  dailyAverageKg: number;
+  contextText: string;
+}
+
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanations: string[];
+  topic: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  content: string;
+  type: 'tip' | 'challenge' | 'general';
+  timestamp: number;
+  read: boolean;
+}
+

@@ -7,75 +7,34 @@ import {
   Target, TrendingDown, ArrowRight, CheckCircle2, XCircle, Search, Info,
   Award, Trophy, HelpCircle as QuestionIcon, ShieldCheck, Sun, Moon,
   Lightbulb, Sparkle, AlertTriangle, ZapOff, Check, AlertOctagon, FlameKindling,
-  BookOpen, Bell, Clock, Share2, Copy, X
+  BookOpen, Bell, Clock, Share2, Copy, X, Heart
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Cell
 } from 'recharts';
 import { playGamificationSound } from './utils/audio';
-
-// Data shapes for EcoTrack Game
-export interface ActivityLog {
-  id: string;
-  timestamp: number;
-  description: string;
-  category: 'transport' | 'food' | 'energy' | 'shopping';
-  co2eKg: number;
-  source: 'manual' | 'quickadd' | 'choice';
-  range?: string;
-  reasoning?: string;
-  avoidedKg?: number; // Carbon saved compared to worst alternative
-}
-
-export interface AiTip {
-  title: string;
-  tip: string;
-  whyMatters: string;
-  estimatedSavings: number;
-}
-
-export interface ActiveChallenge {
-  id: string;
-  title: string;
-  tip: string;
-  targetCount: number;
-  currentCount: number;
-  savingsPerAction: number;
-  xpReward: number;
-  category: string;
-}
-
-export interface Badge {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  unlocked: boolean;
-  requirement: string;
-}
-
-export interface CountryBenchmark {
-  country: string;
-  dailyAverageKg: number;
-  contextText: string;
-}
-
-export interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctIndex: number;
-  explanations: string[];
-  topic: string;
-}
-
-export interface NotificationItem {
-  id: string;
-  title: string;
-  content: string;
-  type: 'tip' | 'challenge' | 'general';
-  timestamp: number;
-  read: boolean;
-}
+import {
+  ActivityLog,
+  AiTip,
+  ActiveChallenge,
+  Badge,
+  CountryBenchmark,
+  QuizQuestion,
+  NotificationItem
+} from './types';
+import {
+  INITIAL_LOGS_SEED,
+  DEFAULT_AI_TIPS,
+  COUNTRIES_BENCHMARKS,
+  DEFAULT_NOTIFICATIONS,
+  getRelativeTimeString,
+  calculateEquivalenceImpact
+} from './utils/carbonHelpers';
+import { auth, db } from './firebase';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where } from 'firebase/firestore';
+import Auth from './components/Auth';
+import HealthSync from './components/HealthSync';
 
 // Sparkly local particle confetti structure
 interface Confetti {
@@ -85,149 +44,6 @@ interface Confetti {
   color: string;
   scale: number;
 }
-
-// Initial logs to ensure and seed interactive gameplay
-const INITIAL_LOGS_SEED: ActivityLog[] = [
-  {
-    id: 'seed-1',
-    timestamp: Date.now() - 4 * 24 * 60 * 60 * 1000,
-    description: '15km drive to city in gasoline car (alternative skipped)',
-    category: 'transport',
-    co2eKg: 3.8,
-    source: 'manual',
-    range: '3.4 - 4.2 kg',
-    reasoning: 'Medium passenger gasoline car estimated footprint.'
-  },
-  {
-    id: 'seed-2',
-    timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000,
-    description: 'Fresh Vegan Falafel Bowl (Ate vegan instead of beef!)',
-    category: 'food',
-    co2eKg: 0.35,
-    source: 'choice',
-    range: '0.2 - 0.5 kg',
-    reasoning: 'Swapped red meat meal with plant-based protein bowl.',
-    avoidedKg: 5.45
-  },
-  {
-    id: 'seed-3',
-    timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000,
-    description: 'Polyester fast-fashion sweater purchase',
-    category: 'shopping',
-    co2eKg: 14.5,
-    source: 'manual',
-    range: '12.0 - 17.0 kg',
-    reasoning: 'Polyester synthetic fibers have high coal manufacturing overheads.'
-  },
-  {
-    id: 'seed-4',
-    timestamp: Date.now() - 1 * 24 * 60 * 60 * 1000,
-    description: 'Short electric bus ride instead of solo car driving',
-    category: 'transport',
-    co2eKg: 0.45,
-    source: 'choice',
-    range: 'approx 0.45 kg',
-    reasoning: 'Clean municipal passenger transit emissions.',
-    avoidedKg: 1.35
-  }
-];
-
-const DEFAULT_AI_TIPS: AiTip[] = [
-  {
-    title: 'Swap Solo Driving for Local Bus',
-    tip: "You have several solo commute gasoline records. Swapping just 3 of these trips with public transit cuts down footprint instantly.",
-    whyMatters: "Standard cars release ~400g CO2e per passenger mile, while shared electric transits sit below 50g.",
-    estimatedSavings: 4.2
-  },
-  {
-    title: 'Ditch Synthetic Polyester Apparel',
-    tip: "A shopping log accounted for 14.5 kg of shopping emissions. Committing to upcycled cotton or verified thrift garments can drop this category close to zero.",
-    whyMatters: "Polyester production demands double the active energy input of organic cotton, releasing severe global fossil emissions.",
-    estimatedSavings: 8.5
-  },
-  {
-    title: 'Incorporate Plant-Based Diet Swaps',
-    tip: "Substituting a standard red beef serving with premium organic vegan salad of similar caloric count reduces personal diet weight significantly.",
-    whyMatters: "Methane and land depletion make meat production hold a major percentage of worldwide global agriculture warming.",
-    estimatedSavings: 5.45
-  }
-];
-
-const COUNTRIES_BENCHMARKS: Record<string, CountryBenchmark> = {
-  'United Kingdom': {
-    country: 'United Kingdom',
-    dailyAverageKg: 12.0,
-    contextText: 'The UK grid is mixed with wind power, but high household heating gas increases winter emission loads.'
-  },
-  'United States': {
-    country: 'United States',
-    dailyAverageKg: 16.2,
-    contextText: 'Suburban travel distances and reliance on heating/cooling systems drive a high national carbon average.'
-  },
-  'Germany': {
-    country: 'Germany',
-    dailyAverageKg: 11.5,
-    contextText: 'Heavy industrial production and coal-related energy sources keep overall averages moderately high.'
-  },
-  'India': {
-    country: 'India',
-    dailyAverageKg: 3.5,
-    contextText: 'Low per-capita energy footprints overall, but rapid coal dependency expansion is actively shifting models.'
-  },
-  'Canada': {
-    country: 'Canada',
-    dailyAverageKg: 15.5,
-    contextText: 'Severe cold seasonal warming profiles and active high extraction sector values inflate benchmarks.'
-  },
-  'Japan': {
-    country: 'Japan',
-    dailyAverageKg: 9.8,
-    contextText: 'High public transport density balances dense urban energy grids and fossil importing pipelines.'
-  },
-  'Australia': {
-    country: 'Australia',
-    dailyAverageKg: 14.8,
-    contextText: 'High domestic coal power grids and massive private transport travel distances.'
-  }
-};
-
-const DEFAULT_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: 'notif-1',
-    title: '🚗 Commuting Tip',
-    content: 'Swapping solo car trips with cycling or transit avoids up to 5.4kg of CO₂e instantly. Try it on your next journey!',
-    type: 'tip',
-    timestamp: Date.now() - 3600000, 
-    read: false
-  },
-  {
-    id: 'notif-2',
-    title: '🌱 Challenge Available',
-    content: 'The "Meat-Free Days Pledge" is open. Tap and accept to log salads or plant food to earn 35 XP!',
-    type: 'challenge',
-    timestamp: Date.now() - 7200000, 
-    read: false
-  },
-  {
-    id: 'notif-3',
-    title: '🌎 EcoTrack Active',
-    content: 'Welcome! Your carbon tracking budget is calibrated. Tap any of the quick-add buttons below to register today\'s footprint activities.',
-    type: 'general',
-    timestamp: Date.now() - 14400000, 
-    read: false
-  }
-];
-
-const getRelativeTimeString = (timestamp: number) => {
-  const diff = Date.now() - timestamp;
-  if (diff < 60000) return 'Just now';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-};
 
 export default function App() {
   // Active Tab navigation state
@@ -343,6 +159,7 @@ export default function App() {
   // Share Weekly Progress state
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [previewPlatform, setPreviewPlatform] = useState<'x' | 'linkedin'>('x');
 
   // Regular input states
   const [freeInput, setFreeInput] = useState('');
@@ -366,6 +183,11 @@ export default function App() {
   const [isFetchingBenchmark, setIsFetchingBenchmark] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'transport' | 'food' | 'energy' | 'shopping'>('all');
   const [historySearch, setHistorySearch] = useState('');
+  const [ledgerPage, setLedgerPage] = useState<number>(1);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [isSyncLoading, setIsSyncLoading] = useState<boolean>(false);
+  const [isCloudDropdownOpen, setIsCloudDropdownOpen] = useState<boolean>(false);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' | 'levelUp' | 'badge' } | null>(null);
 
   // Daily Eco-Quiz State variables
@@ -588,6 +410,139 @@ export default function App() {
     }
   }, [carbonStory]);
 
+  // Firebase auth state observer & cross-device logs merger
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        setIsSyncLoading(true);
+        try {
+          // 1. Synchronize or create gamification profile stats
+          const profileRef = doc(db, 'users', user.uid);
+          const profileSnap = await getDoc(profileRef);
+          
+          let cloudXp = xp;
+          let cloudGoal = weeklyGoal;
+          
+          if (profileSnap.exists()) {
+            const pData = profileSnap.data();
+            cloudXp = typeof pData.xp === 'number' ? pData.xp : xp;
+            cloudGoal = typeof pData.carbonGoal === 'number' ? pData.carbonGoal : weeklyGoal;
+            setXp(cloudXp);
+            setWeeklyGoal(cloudGoal);
+            if (pData.selectedCountry) {
+              setSelectedCountry(pData.selectedCountry);
+            }
+          } else {
+            await setDoc(profileRef, {
+              uid: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || 'Eco Hero',
+              createdAt: new Date().toISOString(),
+              xp,
+              level: levelInfo.level,
+              carbonGoal: weeklyGoal,
+              selectedCountry,
+              badges: ['first_step']
+            });
+          }
+
+          // 2. Fetch remote activity logs
+          const q = query(
+            collection(db, 'carbonLogs'),
+            where('uid', '==', user.uid)
+          );
+          const logsSnap = await getDocs(q);
+          const cloudLogsMap = new Map<string, ActivityLog>();
+          logsSnap.forEach((docSnap) => {
+            const data = docSnap.data();
+            cloudLogsMap.set(docSnap.id, {
+              id: docSnap.id,
+              timestamp: data.timestamp || Date.now(),
+              description: data.description || '',
+              category: data.category || 'transport',
+              co2eKg: data.co2eKg || 0,
+              source: data.source || 'manual',
+              range: data.range,
+              reasoning: data.reasoning,
+              avoidedKg: data.avoidedKg
+            });
+          });
+
+          // Upload local-only logs created during guest sessions
+          const mergedLogs = [...logs];
+          for (const localLog of logs) {
+            if (!cloudLogsMap.has(localLog.id)) {
+              await setDoc(doc(db, 'carbonLogs', localLog.id), {
+                ...localLog,
+                uid: user.uid
+              });
+            }
+          }
+
+          // Fetch newly unified remote entries
+          for (const [cloudId, cloudLog] of cloudLogsMap.entries()) {
+            if (!logs.some(l => l.id === cloudId)) {
+              mergedLogs.push(cloudLog);
+            }
+          }
+
+          mergedLogs.sort((a, b) => b.timestamp - a.timestamp);
+          setLogs(mergedLogs);
+          localStorage.setItem('ecotrack_logs', JSON.stringify(mergedLogs));
+
+          showNotification("☁️ Cloud synchronized status: Secured & Synced!", "success");
+        } catch (err) {
+          console.error("Replication engine error:", err);
+          showNotification("Cloud Sync active: loaded safe client-side copy cache.", "success");
+        } finally {
+          setIsSyncLoading(false);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync user profile properties when they change in real-time
+  useEffect(() => {
+    if (currentUser && !isSyncLoading) {
+      const ref = doc(db, 'users', currentUser.uid);
+      setDoc(ref, {
+        xp,
+        level: levelInfo.level,
+        carbonGoal: weeklyGoal,
+        selectedCountry,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(err => {
+        console.error("Profile sync exception:", err);
+      });
+    }
+  }, [xp, weeklyGoal, selectedCountry, isSyncLoading, levelInfo.level, currentUser]);
+
+  const syncAddLogToCloud = async (logItem: ActivityLog) => {
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'carbonLogs', logItem.id), {
+          ...logItem,
+          uid: auth.currentUser.uid
+        });
+      } catch (e) {
+        console.error("Cloud insert error:", e);
+      }
+    }
+  };
+
+  const syncDeleteLogFromCloud = async (id: string) => {
+    if (auth.currentUser) {
+      try {
+        await deleteDoc(doc(db, 'carbonLogs', id));
+      } catch (e) {
+        console.error("Cloud delete error:", e);
+      }
+    }
+  };
+
   // Persistent system notifications generator
   const addNotificationItem = (title: string, content: string, type: 'tip' | 'challenge' | 'general') => {
     const newNotif: NotificationItem = {
@@ -707,6 +662,7 @@ export default function App() {
     };
 
     setLogs(prev => [logItem, ...prev]);
+    syncAddLogToCloud(logItem);
     showNotification(`Activity chosen! Carbon recorded: ${carbonKg} kg CO2e.`);
     
     // Add XP rewards
@@ -766,6 +722,7 @@ export default function App() {
     setTimeout(() => setLastCarbonLoggedAmount(null), 3000);
 
     setLogs(prev => [fullLog, ...prev]);
+    syncAddLogToCloud(fullLog);
     addXp(10); // Standard +10 XP for logging footprint items
     showNotification(`Added! +${Number(fullLog.co2eKg.toFixed(2))} kg CO2e recorded.`);
   };
@@ -773,6 +730,7 @@ export default function App() {
   // Delete log item
   const handleDeleteLogItem = (id: string) => {
     setLogs(prev => prev.filter(l => l.id !== id));
+    syncDeleteLogFromCloud(id);
     showNotification("Emission log deleted", "error");
   };
 
@@ -807,6 +765,7 @@ export default function App() {
       };
 
       setLogs(prev => [newLogItem, ...prev]);
+      syncAddLogToCloud(newLogItem);
       addXp(12); // Bonus XP for AI-integrated logging
       
       setLastCarbonLoggedAmount(newLogItem.co2eKg);
@@ -837,6 +796,7 @@ export default function App() {
       };
 
       setLogs(prev => [fallbackLog, ...prev]);
+      syncAddLogToCloud(fallbackLog);
       addXp(5);
       setFreeInput('');
       showNotification("Calculated using standard local factors.", "success");
@@ -1183,6 +1143,23 @@ export default function App() {
     });
   }, [logs, historyFilter, historySearch]);
 
+  // Reset ledger page on filter/search change
+  useEffect(() => {
+    setLedgerPage(1);
+  }, [historyFilter, historySearch, logs.length]);
+
+  const ledgerPageSize = 6;
+  const totalLedgerPages = useMemo(() => {
+    return Math.ceil(filteredLogs.length / ledgerPageSize) || 1;
+  }, [filteredLogs.length, ledgerPageSize]);
+
+  const currentPage = Math.min(ledgerPage, totalLedgerPages);
+  
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * ledgerPageSize;
+    return filteredLogs.slice(start, start + ledgerPageSize);
+  }, [filteredLogs, currentPage, ledgerPageSize]);
+
   return (
     <div className={isDarkMode ? 'dark min-h-screen bg-zinc-950 text-zinc-100 transition-colors duration-200' : 'min-h-screen bg-[#F3F8F3] text-[#1c321d] transition-colors duration-200'}>
       
@@ -1250,6 +1227,38 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Cloud Profile Authentication Modal */}
+      <AnimatePresence>
+        {showAuthModal && (
+          <div 
+            id="auth-modal-overlay" 
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowAuthModal(false);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/70 backdrop-blur-xs overflow-y-auto"
+          >
+            <motion.div
+              id="auth-modal-card"
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden relative"
+            >
+              <button
+                onClick={() => setShowAuthModal(false)}
+                className="absolute right-4 top-4 p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-rose-500 rounded-lg transition-all cursor-pointer z-50"
+                title="Close Auth Dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="p-4 sm:p-6">
+                <Auth onLoginSuccess={() => setShowAuthModal(false)} />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Share Progress Modal */}
       <AnimatePresence>
         {isShareModalOpen && (
@@ -1265,7 +1274,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden relative"
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden relative"
             >
               <div className="p-6 sm:p-8 space-y-6">
                 
@@ -1330,6 +1339,166 @@ export default function App() {
                       <span className="font-bold text-zinc-100">{equivalences.treeAbsorptionDays} Pine-Tree Days 🌲</span>
                     </div>
                   </div>
+                </div>
+
+                {/* Social Media Sharing Preview Tab Trigger & Feed Mockup */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono font-black uppercase text-zinc-400 dark:text-zinc-500">Social Media Post Preview</span>
+                    <div className="flex items-center gap-1 bg-zinc-150 dark:bg-zinc-950 p-1 rounded-xl">
+                      <button
+                        onClick={() => setPreviewPlatform('x')}
+                        className={`px-3 py-1 text-[11px] font-extrabold uppercase rounded-lg transition-all cursor-pointer ${
+                          previewPlatform === 'x' 
+                            ? 'bg-zinc-900 text-white dark:bg-zinc-800' 
+                            : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-350 shadow-none'
+                        }`}
+                      >
+                        X (Twitter)
+                      </button>
+                      <button
+                        onClick={() => setPreviewPlatform('linkedin')}
+                        className={`px-3 py-1 text-[11px] font-extrabold uppercase rounded-lg transition-all cursor-pointer ${
+                          previewPlatform === 'linkedin' 
+                            ? 'bg-zinc-900 text-white dark:bg-zinc-800' 
+                            : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-350 shadow-none'
+                        }`}
+                      >
+                        LinkedIn
+                      </button>
+                    </div>
+                  </div>
+
+                  {previewPlatform === 'x' ? (
+                    /* X Twitter Feed Post Structure */
+                    <div className="bg-white dark:bg-black border border-zinc-250 dark:border-zinc-850 p-4 rounded-2xl space-y-3 shadow-xs font-sans text-left text-zinc-900 dark:text-zinc-100">
+                      <div className="flex items-start gap-2.5">
+                        {/* Fake user avatar */}
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-500 to-indigo-600 text-white flex items-center justify-center font-extrabold text-[12px] shrink-0 uppercase tracking-tight">
+                          ID
+                        </div>
+                        {/* Feed info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1 text-[13px] leading-tight flex-wrap">
+                            <span className="font-extrabold hover:underline cursor-pointer">Ishika Dubey</span>
+                            <span className="text-zinc-500 text-[11px]">@ishikadubey1105 · 1m</span>
+                          </div>
+                          
+                          <p className="text-[12px] leading-relaxed text-zinc-800 dark:text-zinc-250 mt-1.5 whitespace-pre-wrap font-sans">
+                            🍀 My @EcoTrack Weekly Performance Report 🍀{"\n"}
+                            📊 Budget Limit: <span className="text-emerald-500 font-bold">{weeklyGoal} kg</span> CO₂e{"\n"}
+                            📉 Carbon Spent: <span className="text-[#34d399] font-bold">{computedMetrics.thisWeekTotal} kg</span>{"\n"}
+                            ✅ Saved: <span className="text-[#34d399] font-bold">+{computedMetrics.avoidedTotal} kg</span>{"\n"}
+                            👑 Status: Level {levelInfo.level} ({levelInfo.name}){"\n"}
+                            🌲 pine tree absorption: {equivalences.treeAbsorptionDays} days!{"\n"}{"\n"}
+                            #EcoTrack #GoGreen #ClimateAction
+                          </p>
+
+                          {/* Post attachment image preview */}
+                          <div className="mt-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden relative bg-gradient-to-r from-emerald-950 to-zinc-950 p-4 shadow-sm">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <Leaf className="w-3.5 h-3.5 text-emerald-400" />
+                                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-350">EcoTrack Performance</span>
+                              </div>
+                              <div className="text-[9px] font-mono uppercase bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-300">Level {levelInfo.level} Completed</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-center text-white py-2">
+                              <div className="bg-white/5 border border-white/5 p-2 rounded-lg">
+                                <div className="text-[9px] text-zinc-400 uppercase font-mono font-bold">Carbon Saved</div>
+                                <div className="text-sm font-black text-emerald-400">+{computedMetrics.avoidedTotal} kg</div>
+                              </div>
+                              <div className="bg-white/5 border border-white/5 p-2 rounded-lg">
+                                <div className="text-[9px] text-zinc-400 uppercase font-mono font-bold">Weekly Streak</div>
+                                <div className="text-sm font-black text-amber-350">{computedMetrics.streakCount} Days</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Tweet action buttons */}
+                          <div className="flex items-center justify-between text-zinc-500 max-w-xs mt-3.5 ml-2">
+                            <div className="flex items-center gap-1 cursor-pointer hover:text-sky-500 transition-colors">
+                              <span className="text-xs">💬</span>
+                              <span className="text-[10px]">2</span>
+                            </div>
+                            <div className="flex items-center gap-1 cursor-pointer hover:text-emerald-500 transition-colors">
+                              <span className="text-xs">🔁</span>
+                              <span className="text-[10px]">14</span>
+                            </div>
+                            <div className="flex items-center gap-1 cursor-pointer hover:text-rose-500 transition-colors">
+                              <span className="text-xs">❤️</span>
+                              <span className="text-[10px] font-bold">45</span>
+                            </div>
+                            <div className="flex items-center gap-1 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
+                              <span className="text-xs">📤</span>
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* LinkedIn Post Structure */
+                    <div className="bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-850 p-4 rounded-2xl space-y-3.5 shadow-xs font-sans text-left text-zinc-900 dark:text-zinc-100">
+                      <div className="flex items-start gap-2.5">
+                        {/* Fake user avatar */}
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-505 to-emerald-600 outline-2 outline-offset-1 outline-emerald-500 text-white flex items-center justify-center font-black text-sm shrink-0 uppercase">
+                          ID
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[13px] font-bold hover:underline cursor-pointer">Ishika Dubey</span>
+                            <span className="text-zinc-400 text-[10px]">· 1st</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500 leading-none">Sustainability Catalyst • EcoTrack Active Contributor</p>
+                          <p className="text-[9px] text-zinc-400 leading-none mt-1">1h · Edited · 🌐</p>
+                        </div>
+                      </div>
+
+                      <p className="text-[11.5px] leading-relaxed text-zinc-800 dark:text-zinc-250 whitespace-pre-wrap font-sans">
+                        🌱 Sharing my weekly progress from EcoTrack! Proud to have saved <span className="font-extrabold text-[#10b981]">{computedMetrics.avoidedTotal} kg CO₂e</span> this week while keeping my footprint under budget. Let's make every small habit count.{"\n"}{"\n"}
+                        💼 Weekly Budget Limit: <span className="font-bold">{weeklyGoal} kg</span>{"\n"}
+                        📊 Carbon Level: Level {levelInfo.level} ({levelInfo.name})
+                      </p>
+
+                      {/* LinkedIn attached visual summary card */}
+                      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden relative bg-[#041d13] p-4 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-white/[0.08] pb-2 mb-2">
+                          <div className="text-[11px] font-bold text-center text-emerald-400 font-mono tracking-widest uppercase">Weekly Eco Report</div>
+                          <span className="text-[9px] text-zinc-400 font-mono">ECOTRACK.PROMPTWARS</span>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-zinc-350">Streak Days active:</span>
+                            <span className="font-bold text-amber-350">{computedMetrics.streakCount} Days 🔥</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-zinc-350">Environmental Title:</span>
+                            <span className="font-bold text-emerald-350">{levelInfo.name}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* LinkedIn visual Likes/Interactions counts */}
+                      <div className="flex items-center justify-between text-[10px] text-zinc-500 border-b border-zinc-150 dark:border-zinc-800 pb-2">
+                        <div className="flex items-center gap-1">
+                          <span className="flex items-center justify-center w-4 h-4 bg-blue-500 text-white rounded-full text-[8.5px]">👍</span>
+                          <span className="flex items-center justify-center w-4 h-4 bg-emerald-500 text-white rounded-full text-[8.5px] -ml-2">👏</span>
+                          <span>You and 12 others</span>
+                        </div>
+                        <span className="hover:underline cursor-pointer">2 comments · 1 repost</span>
+                      </div>
+
+                      {/* LinkedIn Bottom Control toolbar */}
+                      <div className="flex items-center justify-between text-zinc-500 text-[11px] font-semibold pt-1">
+                        <span className="flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">👍 Like</span>
+                        <span className="flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">💬 Comment</span>
+                        <span className="flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">🔄 Repost</span>
+                        <span className="flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-lg cursor-pointer transition-colors">📤 Send</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Raw Text Summary Box */}
@@ -1668,6 +1837,107 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Secure Cloud Profile Sync Hub */}
+            <div className="relative font-sans" id="header-cloud-profile-sync-wrapper">
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => {
+                  if (currentUser) {
+                    setIsCloudDropdownOpen(!isCloudDropdownOpen);
+                  } else {
+                    setShowAuthModal(true);
+                  }
+                }}
+                className={`p-2.5 rounded-xl border text-[10px] font-extrabold flex items-center gap-2 shadow-sm cursor-pointer transition-all ${
+                  currentUser 
+                    ? 'border-emerald-200 dark:border-emerald-950/65 bg-emerald-50/45 dark:bg-emerald-950/20 text-[#10b981]' 
+                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100/50 dark:hover:bg-zinc-800'
+                }`}
+                title="Secure Cloud Profile Sync"
+                id="header-cloud-sync-btn"
+              >
+                {isSyncLoading ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                ) : currentUser ? (
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
+                ) : (
+                  <Globe className="w-3.5 h-3.5" />
+                )}
+                <span className="hidden leading-none md:inline font-mono tracking-wider">
+                  {currentUser ? 'SECURED & SYNCED' : 'CLOUD CONNECT'}
+                </span>
+              </motion.button>
+
+              {/* Cloud Account Profile Dropdown */}
+              <AnimatePresence>
+                {isCloudDropdownOpen && currentUser && (
+                  <>
+                    <div className="fixed inset-0 z-40 cursor-default" onClick={() => setIsCloudDropdownOpen(false)} />
+                    <motion.div
+                      id="cloud-profile-dropdown-panel"
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15, ease: 'easeOut' }}
+                      className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-4 space-y-3.5 text-left"
+                    >
+                      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-full bg-emerald-500 text-zinc-950 flex items-center justify-center font-black text-xs uppercase shrink-0">
+                            {currentUser.email ? currentUser.email.charAt(0) : '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-black text-zinc-800 dark:text-zinc-200 block truncate leading-tight">
+                              {currentUser.displayName || 'Eco Hero Active'}
+                            </span>
+                            <span className="text-[10px] font-mono text-zinc-400 block truncate leading-none mt-0.5">
+                              {currentUser.email || 'Anonymous Guest'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 text-[10.5px]">
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[8px] font-mono">Cloud UID</span>
+                          <span className="font-mono text-zinc-500 font-bold text-[9px] truncate max-w-[120px]">{currentUser.uid}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[8px] font-mono">Synced Logs</span>
+                          <span className="font-bold text-emerald-500 font-mono text-xs">{logs.length} entries</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[8px] font-mono">Experience</span>
+                          <span className="font-bold text-emerald-500 font-mono text-xs">{xp} XP (LV {levelInfo.level})</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[8px] font-mono">Weekly Limit</span>
+                          <span className="font-bold text-zinc-700 dark:text-zinc-300 font-mono text-xs">{weeklyGoal} kg</span>
+                        </div>
+                      </div>
+
+                      <button
+                        id="cloud-signout-btn"
+                        onClick={async () => {
+                          setIsCloudDropdownOpen(false);
+                          try {
+                            await signOut(auth);
+                            showNotification("Signed out safely. Reverted to cached local copy.", "success");
+                          } catch (err) {
+                            showNotification("Signout failed.", "error");
+                          }
+                        }}
+                        className="w-full py-2 bg-rose-50 hover:bg-rose-100 border border-rose-150 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-[10px] uppercase tracking-wider font-extrabold rounded-xl transition-all cursor-pointer"
+                      >
+                        Sign Out / Disconnect
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
             
             {/* Dark mode switcher toggle with high tactile scale feedback */}
             <motion.button
@@ -1706,6 +1976,7 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
             {[
               { id: 'dashboard', label: 'Dashboard', icon: Leaf },
               { id: 'activities', label: 'Log Activity', icon: CheckCircle2 },
+              { id: 'healthSync', label: 'Health Sync', icon: Heart },
               { id: 'simulation', label: 'Simulator & Quiz', icon: TrendingDown },
               { id: 'intelligence', label: 'AI Advice', icon: Lightbulb },
               { id: 'ledger', label: 'Footprint Ledger', icon: BookOpen },
@@ -2877,6 +3148,26 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
           </motion.div>
         )}
 
+        {/* HEALTH & FITNESS TELEMETRY SYNC ENGINE */}
+        {activeTab === 'healthSync' && (
+          <motion.div 
+            key="health-sync-view"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+          >
+            <HealthSync 
+              logs={logs}
+              onAddLog={handleAddNewLog}
+              showNotification={showNotification}
+              addXp={addXp}
+              playGamificationSound={playGamificationSound}
+            />
+          </motion.div>
+        )}
+
         {/* 5. GAI DECARBONIZE TIP ADVICE & COMMITTMENT ACCEPTER */}
         {activeTab === 'intelligence' && (
           <motion.div 
@@ -3009,71 +3300,121 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
               <span className="text-[10px] text-zinc-500 block mt-1">Change filter parameters or log a new action value above.</span>
             </div>
           ) : (
-            <div className="divide-y divide-zinc-150 dark:divide-zinc-800 max-h-[400px] overflow-y-auto pr-2">
-              {filteredLogs.map((log) => (
-                <div 
-                  key={log.id} 
-                  className="py-3.5 flex items-center justify-between gap-4 first:pt-1 last:pb-1 text-xs group"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`p-2 rounded-xl mt-0.5 shrink-0 ${
-                      log.category === 'transport' ? 'bg-[#bbf7d0]/50 text-[#166534]' :
-                      log.category === 'food' ? 'bg-[#fed7aa]/50 text-orange-700' :
-                      log.category === 'energy' ? 'bg-[#fef08a]/50 text-yellow-800' : 'bg-[#e9d5ff]/50 text-purple-700'
-                    }`}>
-                      {log.category === 'transport' && <Car className="w-4 h-4" />}
-                      {log.category === 'food' && <Utensils className="w-4 h-4" />}
-                      {log.category === 'energy' && <Zap className="w-4 h-4" />}
-                      {log.category === 'shopping' && <ShoppingBag className="w-4 h-4" />}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-zinc-800 dark:text-zinc-100">{log.description}</span>
-                        {log.avoidedKg && (
-                          <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold px-2 py-0.5 rounded-md text-[9px] font-mono leading-none">
-                            Saved +{log.avoidedKg} kg CO₂
-                          </span>
-                        )}
-                        <span className="text-[8px] uppercase font-mono font-black tracking-widest text-zinc-400">
-                          via {log.source}
-                        </span>
+            <div className="space-y-4">
+              <div className="divide-y divide-zinc-150 dark:divide-zinc-800 pr-2">
+                {paginatedLogs.map((log) => (
+                  <div 
+                    key={log.id} 
+                    className="py-3.5 flex items-center justify-between gap-4 first:pt-1 last:pb-1 text-xs group"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 rounded-xl mt-0.5 shrink-0 ${
+                        log.category === 'transport' ? 'bg-[#bbf7d0]/50 text-[#166534]' :
+                        log.category === 'food' ? 'bg-[#fed7aa]/50 text-orange-700' :
+                        log.category === 'energy' ? 'bg-[#fef08a]/50 text-yellow-800' : 'bg-[#e9d5ff]/50 text-purple-700'
+                      }`}>
+                        {log.category === 'transport' && <Car className="w-4 h-4" />}
+                        {log.category === 'food' && <Utensils className="w-4 h-4" />}
+                        {log.category === 'energy' && <Zap className="w-4 h-4" />}
+                        {log.category === 'shopping' && <ShoppingBag className="w-4 h-4" />}
                       </div>
 
-                      {log.reasoning && (
-                        <p className="text-[10px] text-zinc-400 block leading-tight mt-1">{log.reasoning}</p>
-                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-zinc-800 dark:text-zinc-100">{log.description}</span>
+                          {log.avoidedKg && (
+                            <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold px-2 py-0.5 rounded-md text-[9px] font-mono leading-none">
+                              Saved +{log.avoidedKg} kg CO₂
+                            </span>
+                          )}
+                          <span className="text-[8px] uppercase font-mono font-black tracking-widest text-zinc-400">
+                            via {log.source}
+                          </span>
+                        </div>
 
-                      <span className="text-[9px] font-mono font-semibold text-zinc-400 block mt-1">
-                        {new Date(log.timestamp).toLocaleString()}
-                      </span>
+                        {log.reasoning && (
+                          <p className="text-[10px] text-zinc-400 block leading-tight mt-1">{log.reasoning}</p>
+                        )}
+
+                        <span className="text-[9px] font-mono font-semibold text-zinc-400 block mt-1">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3.5">
+                      {/* Hover tooltip activator */}
+                      <div 
+                        onMouseEnter={(e) => setHoveredEmission({ value: log.co2eKg, x: e.clientX, y: e.clientY, text: getDynamicEquivalenceTooltip(log.co2eKg) })}
+                        onMouseLeave={() => setHoveredEmission(null)}
+                        className="text-right shrink-0 cursor-help"
+                      >
+                        <span className={`text-sm font-black block tracking-tight ${log.co2eKg < 0 ? 'text-[#10b981]' : 'text-zinc-800 dark:text-white'}`}>
+                          {log.co2eKg > 0 ? '+' : ''}{log.co2eKg} kg
+                        </span>
+                        <span className="text-[8px] font-mono font-bold text-zinc-400 uppercase tracking-widest block">CO₂e View</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLogItem(log.id)}
+                        className="text-zinc-400 hover:text-rose-600 transition-colors p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer"
+                        title="Remove Entry"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
+                ))}
+              </div>
 
-                  <div className="flex items-center gap-3.5">
-                    {/* Hover tooltip activator */}
-                    <div 
-                      onMouseEnter={(e) => setHoveredEmission({ value: log.co2eKg, x: e.clientX, y: e.clientY, text: getDynamicEquivalenceTooltip(log.co2eKg) })}
-                      onMouseLeave={() => setHoveredEmission(null)}
-                      className="text-right shrink-0 cursor-help"
-                    >
-                      <span className={`text-sm font-black block tracking-tight ${log.co2eKg < 0 ? 'text-[#10b981]' : 'text-zinc-800 dark:text-white'}`}>
-                        {log.co2eKg > 0 ? '+' : ''}{log.co2eKg} kg
-                      </span>
-                      <span className="text-[8px] font-mono font-bold text-zinc-400 uppercase tracking-widest block">CO₂e View</span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteLogItem(log.id)}
-                      className="text-zinc-400 hover:text-rose-600 transition-colors p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer"
-                      title="Remove Entry"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+              {/* Pagination indicators and controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between border-t border-zinc-150 dark:border-zinc-800 pt-4 mt-2 gap-4 text-xs">
+                <div className="text-zinc-500 dark:text-zinc-400 font-medium text-center sm:text-left">
+                  Showing <span className="font-bold text-zinc-800 dark:text-zinc-200">{Math.min(filteredLogs.length, (currentPage - 1) * ledgerPageSize + 1)}</span> to <span className="font-bold text-zinc-800 dark:text-zinc-200">{Math.min(filteredLogs.length, currentPage * ledgerPageSize)}</span> of <span className="font-extrabold text-[#10b981]">{filteredLogs.length}</span> logged actions
                 </div>
-              ))}
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setLedgerPage(prev => Math.max(1, prev - 1))}
+                    className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-150 dark:hover:bg-zinc-850 border border-zinc-250 dark:border-zinc-800 text-[10px] font-extrabold uppercase rounded-xl transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300"
+                  >
+                    ◀ Prev
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalLedgerPages }).map((_, idx) => {
+                      const pageNum = idx + 1;
+                      if (totalLedgerPages > 5 && Math.abs(pageNum - currentPage) > 1 && pageNum !== 1 && pageNum !== totalLedgerPages) {
+                        if (pageNum === 2 || pageNum === totalLedgerPages - 1) {
+                          return <span key={`dots-${pageNum}`} className="text-zinc-450 dark:text-zinc-500 font-mono text-[10px] px-1">..</span>;
+                        }
+                        return null;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setLedgerPage(pageNum)}
+                          className={`w-7 h-7 flex items-center justify-center rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                            pageNum === currentPage
+                              ? 'bg-emerald-500 text-zinc-950 font-black'
+                              : 'text-zinc-550 dark:text-zinc-405 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    disabled={currentPage === totalLedgerPages}
+                    onClick={() => setLedgerPage(prev => Math.min(totalLedgerPages, prev + 1))}
+                    className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-150 dark:hover:bg-zinc-850 border border-zinc-250 dark:border-zinc-800 text-[10px] font-extrabold uppercase rounded-xl transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300"
+                  >
+                    Next ▶
+                  </button>
+                </div>
+              </div>
+
             </div>
           )}
 
