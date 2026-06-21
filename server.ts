@@ -33,7 +33,7 @@ app.get("/api/health", (req, res) => {
 // Parse natural-language activity log using Gemini 3.5 Flash
 app.post("/api/parse-activity", async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, country, region } = req.body;
     if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Missing required 'text' field in request body" });
     }
@@ -42,19 +42,30 @@ app.post("/api/parse-activity", async (req, res) => {
     
     const prompt = `
 You are "EcoTrack AI Carbon Calculator". Parse this short user-logged physical activity statement in English: "${text}".
-Estimate the greenhouse gas impact in CO2 equivalent kilograms (kg CO2e) utilizing general scientific averages.
+The user is located in: "${country || "United States"}"${region ? ` (Sub-Region/State: ${region})` : ""}.
+
+CRITICAL: Adjust carbon parameters specifically for context-aware localization!
+1. If country is India:
+   - Recognize Indian regional transportation options:
+     - CNG auto-rickshaws have low emissions (around 0.05-0.08 kg CO2e per km).
+     - Local trains (like Mumbai locals) or Metros (like Delhi, Bangalore, or Kochi metro) are extremely efficient, around 0.015-0.03 kg CO2e per passenger km.
+     - Gasoline scooters/two-wheelers have about 0.05-0.07 kg CO2e per km (much lower than standard Western passenger cars).
+     - Heavy petrol/diesel SUVs have ~0.22 kg CO2e per km.
+   - Recognize India-specific electricity grid factors based on sub-region:
+     - For coal-dominated sub-grids (e.g. Maharashtra, West Bengal, Delhi NCR, Uttar Pradesh), the electricity grid is high-carbon, around 0.78 - 0.85 kg CO2e per kWh.
+     - For cleaner green-energy sub-grids (e.g. Karnataka with Pavagada Solar, Tamil Nadu with high wind, or Kerala with hydro reservoirs), the factor is around 0.45 - 0.60 kg CO2e per kWh.
+   - Recognize traditional Indian healthy vegetarian diets:
+     - A standard Indian home-cooked plant-based meal (e.g. dal, roti, rice, sabzi) has very minimal footprint (~0.25 kg CO2e per meal).
+     - Swapping or choosing traditional vegetarian food avoids high cattle-raising beef footprint models (~5.45 kg avoided).
+
+2. If country is United States, United Kingdom, Germany, etc., utilize their standard respective national grid densities (e.g., US: ~0.4 kg/kWh, Germany: ~0.38 kg/kWh) and passenger car metrics.
+
+Estimate the overall greenhouse gas impact in CO2 equivalent kilograms (kg CO2e) utilizing these localized scientific averages.
 Map the activity STRICTLY to one of these four categories:
-- 'transport' (cars, flying, public transit, trains, biking)
+- 'transport' (cars, flying, public transit, trains, biking, rickshaws)
 - 'food' (meals, beverages, animal agriculture vs plant-based)
 - 'energy' (appliances, smart devices, air heaters, HVAC, lights, solar)
 - 'shopping' (clothing, new electronics, plastic gadgets, major goods)
-
-Be mathematically reasonable. E.g.:
-- Medium car commute: ~0.2-0.4 kg CO2e per km
-- A serving of beef: ~5.8 kg CO2e
-- A serving of chicken: ~1.4 kg CO2e
-- Green solar generation / walking: 0.0 kg CO2e or a small negative credits for recycling.
-- Home energy: ~0.4 kg CO2e per kWh
 
 If the statement contains negative physical credits (e.g. "recycled", "composted", "planted a tree"), calculate a native balance or carbon offset credit (e.g., -0.5 kg to -2.0 kg).
 
@@ -92,20 +103,21 @@ Output a valid JSON object matching this schema. Be robust with approximate unce
 // Generate highly personalized actions-based tips from logged entries
 app.post("/api/insights", async (req, res) => {
   try {
-    const { logs, weeklyGoal } = req.body;
+    const { logs, weeklyGoal, country, region } = req.body;
     const client = getAiClient();
     
     const prompt = `
-You are "EcoTrack AI Sustainability Advisor".
+You are "EcoTrack AI Sustainability Advisor", a localized environmental coach.
 Analyze the user's carbon footprint data over the past week and generate 2-3 highly specific reduction tips.
 Their current weekly limit goal is: ${weeklyGoal || 80} kg CO2e.
+The user is located in: "${country || "United States"}"${region ? ` (Sub-Region/State: ${region})` : ""}.
 
-Recent Carbon Footprint Logs:
-${JSON.stringify(logs || [], null, 2)}
-
-Requirements:
+Requirements & Localization Context:
 - Ensure the tips are personalized to their logged actions, mentioning concrete categories, notes, counts, or categories that dominated.
-- DO NOT output generic boilerplate. Use the raw figures directly (e.g. "Your transport logs totaled 24.5 kg CO2e. Shaving off just one 10-mile ride by walking reduces this by X!").
+- If the user is in India (and considering sub-region: ${region || "general India"}):
+  - Note state-specific factors (e.g. if their state has heavily coal-reliant power like Delhi or Maharashtra, highlight household vampire power draws or AC efficiency. If they are in Kerala/HP, praise hydro-capacity but call out transport options).
+  - Advocate for highly effective Indian regional swaps: shifting to CNG auto rides, adopting electric scooters over fuel bikes, and prioritizing local seasonal grains like millets/bajra/ragi over imported dairy or beef options.
+- DO NOT output generic boilerplate. Use the raw figures directly (e.g. "Your transport logs totaled 24.5 kg CO2e...").
 - Calculate some potential savings in kg CO2e for each recommendation.
 - Add a tiny, friendly "why this matters" explanation.
 
@@ -150,7 +162,7 @@ Respond with a strictly formatted JSON object matching this schema:
 // Endpoint to generate "Weekly Carbon Story" via Gemini
 app.post("/api/carbon-story", async (req, res) => {
   try {
-    const { logs, activeChallenges, weeklyGoal } = req.body;
+    const { logs, activeChallenges, weeklyGoal, country, region } = req.body;
     const client = getAiClient();
 
     const prompt = `
@@ -159,13 +171,14 @@ Analyze the user's carbon footprint logs and active challenges from this week.
 Logs: ${JSON.stringify(logs || [])}
 Active Challenges: ${JSON.stringify(activeChallenges || [])}
 Weekly Goal: ${weeklyGoal || 80} kg CO2e.
+The user is located in: "${country || "United States"}"${region ? ` (Sub-Region/State: ${region})` : ""}.
 
 Instructions for writing the Weekly Carbon Story:
 1. Speak directly to the user (use "you" / "your").
 2. Write a short, engaging story-style narrative of their week:
-   - Open with a bold HIGHLIGHT: celebrate their absolute best moment (e.g. choosing low-carbon travel, vegan meal alternative, or saving emissions) referencing the specific day of the week if possible.
-   - Include one honest, lighthearted CALLOUT: reference their highest emission moment (e.g. driving solo, synthetic polyester shopping) as a friendly nudge, but keep it warm, coaching, and never shaming or guilty.
-   - Close with an encouraging positive nudge linked to an accepted challenge commitment or their target carbon budget.
+   - Open with a bold HIGHLIGHT: celebrate their absolute best moment (e.g. choosing low-carbon travel, Indian regional train, vegan meal, or saving emissions) referencing the specific day of the week if possible.
+   - Include one honest, lighthearted CALLOUT: reference their highest emission moment (e.g. driving solo, synthetic clothes shopping, running high-power appliances on coal grid) as a friendly nudge, but keep it warm, coaching, and never shaming or guilty.
+   - Close with an encouraging positive nudge linked to an accepted challenge commitment or their target carbon budget, reflecting local realities of ${country} and subregion ${region || "general region"}.
 3. Be specific! Mention the actual names of logs and their specific CO2 kg quantities.
 4. Keep the narrative concise (around 150-250 words), conversational, warm, and highly engaging.
 5. Extract/Identify:

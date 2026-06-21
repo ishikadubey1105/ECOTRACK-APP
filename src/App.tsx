@@ -4,7 +4,7 @@ import {
   Leaf, Car, Zap, Utensils, ShoppingBag, 
   Sparkles, Flame, TreePine, Smartphone, 
   Trash2, Plus, AlertCircle, RefreshCw, Globe, HelpCircle, 
-  Target, TrendingDown, ArrowRight, CheckCircle2, XCircle, Search, Info,
+  Target, TrendingDown, ArrowRight, CheckCircle2, XCircle, Search, Info, MapPin,
   Award, Trophy, HelpCircle as QuestionIcon, ShieldCheck, Sun, Moon,
   Lightbulb, Sparkle, AlertTriangle, ZapOff, Check, AlertOctagon, FlameKindling,
   BookOpen, Bell, Clock, Share2, Copy, X, Heart
@@ -29,7 +29,8 @@ import {
   COUNTRIES_BENCHMARKS,
   DEFAULT_NOTIFICATIONS,
   getRelativeTimeString,
-  calculateEquivalenceImpact
+  calculateEquivalenceImpact,
+  INDIAN_STATES_CENTROIDS
 } from './utils/carbonHelpers';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
@@ -82,23 +83,31 @@ export default function App() {
   });
 
   const [weeklyGoal, setWeeklyGoal] = useState<number>(() => {
-    return Number(localStorage.getItem('ecotrack_goal') || '80');
+    return Number(localStorage.getItem('ecotrack_goal') || '25');
   });
 
   const [xp, setXp] = useState<number>(() => {
     return Number(localStorage.getItem('ecotrack_xp') || '45'); // start close to level up to make gameplay interactive
   });
 
-  const [selectedCountry, setSelectedCountry] = useState<string>(() => {
-    return localStorage.getItem('ecotrack_country') || 'United States';
+  const [selectedCountry, setSelectedCountry] = useState<string>('India');
+
+  const [selectedIndiaRegion, setSelectedIndiaRegion] = useState<string>(() => {
+    return localStorage.getItem('ecotrack_india_region') || 'Delhi NCR / Northern Grid';
   });
 
+  const [hoveredIndiaRegion, setHoveredIndiaRegion] = useState<string | null>(null);
+
+  // India Regional Map Zoom and Pan coordinates system states
+  const [mapZoom, setMapZoom] = useState<number>(1);
+  const [mapPan, setMapPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDraggingMap, setIsDraggingMap] = useState<boolean>(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const [detectingLocation, setDetectingLocation] = useState<boolean>(false);
+
   const [countryBenchmark, setCountryBenchmark] = useState<CountryBenchmark>(() => {
-    const saved = localStorage.getItem('ecotrack_country_benchmark');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
-    }
-    return COUNTRIES_BENCHMARKS['United States'];
+    return COUNTRIES_BENCHMARKS['India'];
   });
 
   const [aiTips, setAiTips] = useState<AiTip[]>(() => {
@@ -382,6 +391,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('ecotrack_country', selectedCountry);
   }, [selectedCountry]);
+
+  useEffect(() => {
+    localStorage.setItem('ecotrack_india_region', selectedIndiaRegion);
+  }, [selectedIndiaRegion]);
 
   useEffect(() => {
     localStorage.setItem('ecotrack_country_benchmark', JSON.stringify(countryBenchmark));
@@ -745,7 +758,11 @@ export default function App() {
       const response = await fetch('/api/parse-activity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: freeInput })
+        body: JSON.stringify({ 
+          text: freeInput,
+          country: selectedCountry,
+          region: selectedCountry === 'India' ? selectedIndiaRegion : undefined
+        })
       });
 
       if (!response.ok) {
@@ -1048,6 +1065,7 @@ export default function App() {
   const handleCountryChoiceChange = async (countryName: string) => {
     setSelectedCountry(countryName);
     setIsFetchingBenchmark(true);
+    let resolvedAverage = 12.0;
     try {
       const response = await fetch('/api/country-context', {
         method: 'POST',
@@ -1056,9 +1074,10 @@ export default function App() {
       });
       if (response.ok) {
         const result = await response.json();
+        resolvedAverage = Number(result.dailyAverageKg ?? 12.0);
         setCountryBenchmark({
           country: result.country || countryName,
-          dailyAverageKg: Number(result.dailyAverageKg ?? 12.0),
+          dailyAverageKg: resolvedAverage,
           contextText: result.contextText || 'National consumer footprint matrix metrics.'
         });
         showNotification(`Benchmark set: ${countryName}`);
@@ -1068,8 +1087,10 @@ export default function App() {
     } catch (e) {
       // Fallback
       if (COUNTRIES_BENCHMARKS[countryName]) {
+        resolvedAverage = COUNTRIES_BENCHMARKS[countryName].dailyAverageKg;
         setCountryBenchmark(COUNTRIES_BENCHMARKS[countryName]);
       } else {
+        resolvedAverage = 10.5;
         setCountryBenchmark({
           country: countryName,
           dailyAverageKg: 10.5,
@@ -1078,6 +1099,10 @@ export default function App() {
       }
     } finally {
       setIsFetchingBenchmark(false);
+      // Automatically scale the weekly goal dynamically to match the country's average per-capita daily budget weekly counterpart!
+      const calibratedWeeklyGoal = Math.round(resolvedAverage * 7);
+      setWeeklyGoal(calibratedWeeklyGoal);
+      showNotification(`Weekly objective adjusted to ${calibratedWeeklyGoal} kg CO₂e to match local ${countryName} emission profile!`, "success");
     }
   };
 
@@ -1088,7 +1113,12 @@ export default function App() {
       const response = await fetch('/api/insights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs, weeklyGoal })
+        body: JSON.stringify({ 
+          logs, 
+          weeklyGoal,
+          country: selectedCountry,
+          region: selectedCountry === 'India' ? selectedIndiaRegion : undefined
+        })
       });
 
       if (!response.ok) {
@@ -1127,7 +1157,13 @@ export default function App() {
       const response = await fetch('/api/carbon-story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs, activeChallenges, weeklyGoal })
+        body: JSON.stringify({ 
+          logs, 
+          activeChallenges, 
+          weeklyGoal,
+          country: selectedCountry,
+          region: selectedCountry === 'India' ? selectedIndiaRegion : undefined
+        })
       });
 
       if (!response.ok) {
@@ -1992,18 +2028,10 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
               {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-600" />}
             </motion.button>
 
-            {/* Select Benchmarks */}
-            <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-bold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-950/60 py-1.5 px-3.5 rounded-full border border-zinc-200/20">
-              <Globe className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <select
-                value={selectedCountry}
-                onChange={(e) => handleCountryChoiceChange(e.target.value)}
-                className="bg-transparent border-none py-0 pl-1 pr-1 font-extrabold text-emerald-800 dark:text-emerald-400 outline-none cursor-pointer"
-              >
-                {Object.keys(COUNTRIES_BENCHMARKS).map(name => (
-                  <option className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white" key={name} value={name}>{name}</option>
-                ))}
-              </select>
+            {/* Select Benchmarks (Locked to India Only) */}
+            <div className="hidden sm:flex items-center gap-2 bg-[#f0fdf4] dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-900/40 py-1.5 px-4 rounded-full text-xs font-black shadow-xs">
+              <Globe className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 animate-pulse" />
+              <span className="text-emerald-900 dark:text-emerald-300 font-sans tracking-wide">Region: 🇮🇳 India</span>
             </div>
           </div>
 
@@ -2231,6 +2259,422 @@ Join me on EcoTrack & reduce your daily carbon footprints!`;
             <span className="text-sm font-extrabold text-emerald-800 dark:text-emerald-400 shrink-0">{weeklyGoal} kg/week</span>
           </div>
         </div>
+
+        {/* INDIAN SUB-REGION & SURROUNDING ADVISOR */}
+        {selectedCountry === 'India' && (
+          <div className="bg-gradient-to-br from-[#fbfcfa] to-[#f4fbf6] dark:from-zinc-900/60 dark:to-zinc-950/80 border border-emerald-100 dark:border-zinc-800/80 p-6 sm:p-8 rounded-3xl shadow-xs space-y-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-850 pb-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 bg-orange-50 dark:bg-zinc-950 border border-orange-100 dark:border-zinc-800/80 py-1 px-3 rounded-full text-[10px] font-bold uppercase tracking-wider text-orange-850 dark:text-orange-400 mb-2">
+                  <Globe className="w-3.5 h-3.5 text-orange-500 animate-spin-slow" />
+                  <span>Interactive Localized Advisor</span>
+                </div>
+                <h3 className="text-xl font-black font-serif text-emerald-950 dark:text-zinc-50 flex items-center gap-2">
+                  <span>🇮🇳 Indian Regional Carbon Planner</span>
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Adapt calculations to your specific state's power grids, mass transit availability, and surrounding emission profiles.
+                </p>
+              </div>
+
+              {/* Geo Detect Button and Manual Selection dropdown */}
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                <button
+                  onClick={async () => {
+                    if (!navigator.geolocation) {
+                      showNotification("Geolocation is not supported by your browser.", "error");
+                      return;
+                    }
+                    setDetectingLocation(true);
+                    navigator.geolocation.getCurrentPosition(
+                      (position) => {
+                        const { latitude, longitude } = position.coords;
+                        let minDistance = Infinity;
+                        let closest = INDIAN_STATES_CENTROIDS[0];
+                        
+                        INDIAN_STATES_CENTROIDS.forEach((state) => {
+                          const dist = Math.sqrt(Math.pow(state.lat - latitude, 2) + Math.pow(state.lng - longitude, 2));
+                          if (dist < minDistance) {
+                            minDistance = dist;
+                            closest = state;
+                          }
+                        });
+                        
+                        setSelectedIndiaRegion(closest.name);
+                        setDetectingLocation(false);
+                        showNotification(`Located closest state! Switched to: ${closest.name}`, "success");
+                      },
+                      (error) => {
+                        console.error(error);
+                        setDetectingLocation(false);
+                        showNotification("Location permission denied. Please select your state manually from the list.", "error");
+                      },
+                      { enableHighAccuracy: true, timeout: 6000 }
+                    );
+                  }}
+                  disabled={detectingLocation}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800 text-white font-bold text-xs rounded-2xl shadow-sm transition-all flex items-center gap-2 cursor-pointer w-full sm:w-auto justify-center"
+                >
+                  <MapPin className={`w-3.5 h-3.5 ${detectingLocation ? 'animate-bounce' : ''}`} />
+                  <span>{detectingLocation ? 'Auto-detecting state...' : 'Detect My Sub-Region'}</span>
+                </button>
+
+                <div className="relative w-full sm:w-auto">
+                  <select
+                    value={selectedIndiaRegion}
+                    onChange={(e) => {
+                      setSelectedIndiaRegion(e.target.value);
+                      showNotification(`Switched sub-region to ${e.target.value}`, "success");
+                    }}
+                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs py-2 px-3.5 pr-8 rounded-2xl outline-none font-extrabold text-emerald-800 dark:text-emerald-400 cursor-pointer appearance-none"
+                  >
+                    {INDIAN_STATES_CENTROIDS.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-zinc-400">
+                    ▼
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Split layout: Interactive Geo Heatmap (Left/Top) & Config Metrics Details (Right/Bottom) */}
+            {(() => {
+              const activeConfig = INDIAN_STATES_CENTROIDS.find(c => c.name === selectedIndiaRegion) || INDIAN_STATES_CENTROIDS[0];
+              
+              // Helper to resolve coordinates
+              const getHotspotCoords = (name: string) => {
+                switch (name) {
+                  case 'Maharashtra / Western Grid': return { x: 77, y: 162 };
+                  case 'Delhi NCR / Northern Grid': return { x: 92, y: 74 };
+                  case 'Karnataka / Southern Grid': return { x: 96, y: 230 };
+                  case 'Tamil Nadu / Southern Grid': return { x: 106, y: 249 };
+                  case 'Kerala / Southern Grid': return { x: 83, y: 252 };
+                  case 'West Bengal / Eastern Grid': return { x: 198, y: 130 };
+                  case 'Uttar Pradesh / Northern Grid': return { x: 129, y: 92 };
+                  default: return { x: 150, y: 150 };
+                }
+              };
+
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch animate-fade-in">
+                  {/* LEFT COLUMN: SVG-based Geographic Heat Map of India */}
+                  <div className="lg:col-span-5 bg-white dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-150 dark:border-zinc-800/80 flex flex-col justify-between space-y-4">
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-black text-zinc-850 dark:text-zinc-150 flex items-center gap-2">
+                        <span>🌍 Interactive National Grid Map</span>
+                      </h4>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Select carbon-heavy hotspot regions (Red) or greener territories (Green/Orange) directly on the interactive layout to review and plan region-specific offsets.
+                      </p>
+                    </div>
+
+                    {/* SVG map of India with floating zoom/pan controls */}
+                    <div className="relative flex justify-center items-center bg-zinc-50/50 dark:bg-zinc-900/30 p-2 rounded-2xl border border-zinc-100 dark:border-zinc-900 overflow-hidden group select-none">
+                      {/* Floating Zoom & Pan Control Deck */}
+                      <div className="absolute top-3 right-3 flex flex-col gap-1.5 z-10 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setMapZoom(z => Math.min(3.5, z + 0.25))}
+                          className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-zinc-900 hover:bg-emerald-100 dark:hover:bg-zinc-850 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-black text-sm transition-all active:scale-90 cursor-pointer"
+                          title="Zoom In"
+                        >
+                          ＋
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapZoom(z => Math.max(0.8, z - 0.25))}
+                          className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-zinc-900 hover:bg-emerald-100 dark:hover:bg-zinc-850 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-black text-sm transition-all active:scale-90 cursor-pointer"
+                          title="Zoom Out"
+                        >
+                          －
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMapZoom(1);
+                            setMapPan({ x: 0, y: 0 });
+                          }}
+                          className="px-1.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-850 text-zinc-600 dark:text-zinc-350 flex items-center justify-center font-extrabold text-[8px] uppercase tracking-wider transition-all active:scale-90 cursor-pointer mt-0.5"
+                          title="Reset View"
+                        >
+                          Reset
+                        </button>
+                      </div>
+
+                      {/* Info hint overlay */}
+                      <div className="absolute bottom-3 right-3 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-zinc-900/80 dark:bg-zinc-950/90 backdrop-blur-xs text-[9px] text-zinc-200 py-1 px-2 rounded-lg font-mono">
+                        🖱️ Drag to Pan
+                      </div>
+
+                      <svg
+                        viewBox="0 0 300 310"
+                        className={`w-full max-w-[270px] h-auto drop-shadow-xs overflow-visible cursor-grab ${isDraggingMap ? 'cursor-grabbing' : ''}`}
+                        onMouseDown={(e) => {
+                          setIsDraggingMap(true);
+                          setDragStart({ x: e.clientX - mapPan.x, y: e.clientY - mapPan.y });
+                        }}
+                        onMouseMove={(e) => {
+                          if (!isDraggingMap) return;
+                          setMapPan({
+                            x: e.clientX - dragStart.x,
+                            y: e.clientY - dragStart.y
+                          });
+                        }}
+                        onMouseUp={() => setIsDraggingMap(false)}
+                        onMouseLeave={() => setIsDraggingMap(false)}
+                        onTouchStart={(e) => {
+                          if (e.touches.length === 1) {
+                            setIsDraggingMap(true);
+                            setDragStart({
+                              x: e.touches[0].clientX - mapPan.x,
+                              y: e.touches[0].clientY - mapPan.y
+                            });
+                          }
+                        }}
+                        onTouchMove={(e) => {
+                          if (!isDraggingMap || e.touches.length !== 1) return;
+                          setMapPan({
+                            x: e.touches[0].clientX - dragStart.x,
+                            y: e.touches[0].clientY - dragStart.y
+                          });
+                        }}
+                        onTouchEnd={() => setIsDraggingMap(false)}
+                      >
+                        {/* Interactive Scale and Translation group */}
+                        <g 
+                          transform={`translate(${mapPan.x}, ${mapPan.y}) scale(${mapZoom})`}
+                          style={{ 
+                            transformOrigin: '150px 155px', 
+                            transition: isDraggingMap ? 'none' : 'transform 150ms cubic-bezier(0.16, 1, 0.3, 1)' 
+                          }}
+                        >
+                          {/* India Geographic Outline Path */}
+                          <path
+                            d="M 68 5 L 110 18 L 105 45 L 122 60 L 180 82 L 205 79 L 235 80 L 282 78 L 253 140 L 235 130 L 205 143 L 180 162 L 122 205 L 123 229 L 95 279 L 78 250 L 59 210 L 48 170 L 45 150 L 15 137 L 5 122 L 20 95 L 60 50 Z"
+                            fill="currentColor"
+                            className="text-emerald-500/5 dark:text-emerald-500/2 stroke-zinc-200 dark:stroke-zinc-800"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          
+                          {/* Soft map latitude/longitude grid lines for high-tech style */}
+                          <line x1="10" y1="100" x2="290" y2="100" stroke="currentColor" className="text-zinc-150 dark:text-zinc-800/20" strokeWidth="1" strokeDasharray="3 3" />
+                          <line x1="10" y1="200" x2="290" y2="200" stroke="currentColor" className="text-zinc-150 dark:text-zinc-800/20" strokeWidth="1" strokeDasharray="3 3" />
+                          <line x1="100" y1="10" x2="100" y2="300" stroke="currentColor" className="text-zinc-150 dark:text-zinc-800/20" strokeWidth="1" strokeDasharray="3 3" />
+                          <line x1="200" y1="10" x2="200" y2="300" stroke="currentColor" className="text-zinc-150 dark:text-zinc-800/20" strokeWidth="1" strokeDasharray="3 3" />
+
+                          {/* Rendering region bubbles/circles */}
+                          {INDIAN_STATES_CENTROIDS.map((r) => {
+                            const coords = getHotspotCoords(r.name);
+                            const isSelected = r.name === selectedIndiaRegion;
+                            const isHovered = r.name === hoveredIndiaRegion;
+                            
+                            // Determine heat colors based on carbon grid factor limit
+                            let circleColor = "text-rose-500";
+                            let ringColor = "text-rose-400";
+                            if (r.gridFactor <= 0.5) {
+                              circleColor = "text-emerald-500";
+                              ringColor = "text-emerald-400";
+                            } else if (r.gridFactor <= 0.65) {
+                              circleColor = "text-amber-500";
+                              ringColor = "text-amber-400";
+                            }
+
+                            // Factor size scaling (radius ranges from 8 to 14)
+                            const radius = 6 + (r.gridFactor * 8);
+
+                            return (
+                              <g 
+                                key={r.name}
+                                className="cursor-pointer transition-all duration-300"
+                                onClick={(e) => {
+                                  // Prevent event parent conflicts
+                                  e.stopPropagation();
+                                  setSelectedIndiaRegion(r.name);
+                                  showNotification(`Switched grid reference to ${r.name}`, "success");
+                                }}
+                                onMouseEnter={() => setHoveredIndiaRegion(r.name)}
+                                onMouseLeave={() => setHoveredIndiaRegion(null)}
+                              >
+                                {/* Glowing pulsator indicator for selected state */}
+                                {isSelected && (
+                                  <circle
+                                    cx={coords.x}
+                                    cy={coords.y}
+                                    r={radius + 8}
+                                    fill="none"
+                                    stroke="currentColor"
+                                    className={`${ringColor} opacity-75 animate-ping`}
+                                    strokeWidth="1.5"
+                                    style={{ transformOrigin: `${coords.x}px ${coords.y}px` }}
+                                  />
+                                )}
+
+                                {/* Target point circle */}
+                                <circle
+                                  cx={coords.x}
+                                  cy={coords.y}
+                                  r={radius}
+                                  fill="currentColor"
+                                  className={`${circleColor} transition-transform duration-300 hover:scale-125`}
+                                  opacity={isSelected || isHovered ? "1.0" : "0.7"}
+                                  stroke={isSelected ? "#ffffff" : "currentColor"}
+                                  strokeWidth={isSelected ? "2" : "0.5"}
+                                />
+
+                                {/* Simple mini-label for critical hotspots or selected region */}
+                                {(isSelected || isHovered) && (
+                                  <g className="pointer-events-none">
+                                    {/* Tooltip backing */}
+                                    <rect
+                                      x={Math.max(10, coords.x - 70)}
+                                      y={coords.y - 38}
+                                      width="140"
+                                      height="24"
+                                      rx="6"
+                                      fill="#18181b"
+                                      stroke="#3f3f46"
+                                      strokeWidth="0.5"
+                                    />
+                                    <text
+                                      x={coords.x}
+                                      y={coords.y - 22}
+                                      fontFamily="monospace"
+                                      fontSize="8"
+                                      fontWeight="bold"
+                                      fill="white"
+                                      textAnchor="middle"
+                                    >
+                                      {r.name.split(" / ")[0]}: {r.gridFactor} kg/kWh
+                                    </text>
+                                  </g>
+                                )}
+                              </g>
+                            );
+                          })}
+                        </g>
+                      </svg>
+
+                      {/* Map Hotspot Legend overlay */}
+                      <div className="absolute bottom-2 left-2 bg-black/75 dark:bg-black/90 backdrop-blur-xs py-1 px-2.5 rounded-lg text-[9px] font-mono text-zinc-300 flex items-center gap-2 border border-zinc-800">
+                        <span className="font-extrabold text-white">Grid Intensity:</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Clean</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Med</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Heavy</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* RIGHT COLUMN: Selected Sub-Region Information parameters */}
+                  <div className="lg:col-span-7 flex flex-col justify-between gap-6">
+                    {/* Selected state card header display */}
+                    <div className="bg-emerald-500/5 dark:bg-emerald-500/2 border border-emerald-100/30 dark:border-zinc-800 p-5 rounded-3xl flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] uppercase font-mono tracking-wider text-emerald-650 dark:text-emerald-400 font-extrabold block">
+                          Reporting Coordinate System
+                        </span>
+                        <h4 className="text-xl font-black text-emerald-950 dark:text-zinc-50 font-serif">
+                          {activeConfig.name}
+                        </h4>
+                      </div>
+                      <div className="p-3 bg-white dark:bg-zinc-900 rounded-xl border border-emerald-100 dark:border-zinc-800 text-xl shadow-xs">
+                        🇮🇳
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1">
+                      {/* Left Parameter: Grid Emission Intensity bar */}
+                      <div className="bg-zinc-50 dark:bg-zinc-950/60 p-5 rounded-2xl border border-zinc-100 dark:border-zinc-850/60 flex flex-col justify-between">
+                        <div>
+                          <span className="text-[9px] uppercase font-mono tracking-wider text-zinc-400 font-extrabold block mb-1">
+                            Grid Intensity Index
+                          </span>
+                          <div className="text-2xl font-black text-amber-600 dark:text-amber-400 flex items-baseline gap-1">
+                            {activeConfig.gridFactor} <span className="text-[10px] font-bold text-zinc-500">kg CO₂/kWh</span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
+                            {activeConfig.description}
+                          </p>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-zinc-200/50 dark:border-zinc-850">
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-zinc-400">Carbon Level:</span>
+                            <span className={activeConfig.gridFactor > 0.75 ? "text-rose-500 font-black animate-pulse" : activeConfig.gridFactor > 0.6 ? "text-amber-500 font-black" : "text-emerald-500 font-black"}>
+                              {activeConfig.gridFactor > 0.75 ? "Industrial Hotspot" : activeConfig.gridFactor > 0.6 ? "Medium Grid" : "Renewable Clean"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Middle Parameter: Surrounding Infrastructure Facts */}
+                      <div className="bg-zinc-50 dark:bg-zinc-950/60 p-5 rounded-2xl border border-zinc-100 dark:border-zinc-850/60 flex flex-col justify-between">
+                        <div>
+                          <span className="text-[9px] uppercase font-mono tracking-wider text-[#10b981] font-extrabold block mb-1">
+                            Surroundings & Cities
+                          </span>
+                          <h4 className="text-[11px] font-bold text-zinc-800 dark:text-zinc-200 mt-1">
+                            Geographical Scope:
+                          </h4>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed font-sans">
+                            {activeConfig.surroundings}
+                          </p>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-zinc-200/50 dark:border-zinc-850">
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-zinc-400">Public Travel:</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-black">High Connectivity</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Parameter: How to Reduce Emissions in State */}
+                      <div className="bg-emerald-500/5 dark:bg-zinc-950/80 p-5 rounded-2xl border border-emerald-500/10 dark:border-zinc-800 flex flex-col justify-between">
+                        <div>
+                          <span className="text-[9px] uppercase font-mono tracking-widest text-[#10b981] font-bold block mb-1">
+                            🎯 Local Abatement Plan
+                          </span>
+                          <h4 className="text-[11px] font-bold text-emerald-950 dark:text-zinc-100 mt-1">
+                            Low Carbon Swap Target:
+                          </h4>
+                          <p className="text-[11px] text-emerald-800 dark:text-zinc-300 mt-2 leading-relaxed italic font-medium">
+                            "{activeConfig.tip}"
+                          </p>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-emerald-500/10 dark:border-zinc-850">
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-zinc-400">Reduction Lever:</span>
+                            <span className="text-orange-600 dark:text-orange-400 font-black">Dynamic Shift</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Educational disclaimer on how coordinate/location input is utilized */}
+            <div className="p-4 bg-emerald-50/20 dark:bg-zinc-950/40 border border-emerald-100/30 dark:border-zinc-800/80 rounded-2xl text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed space-y-2">
+              <p className="font-extrabold text-emerald-950 dark:text-zinc-200 flex items-center gap-1">
+                ℹ️ How the EcoTrack AI utilizes your location inputs:
+              </p>
+              <p>
+                When you auto-locate or manually switch to a region in India, the application immediately starts using customized local factors. 
+                Instead of general US passenger car averages, we customize your logs for localized travel (CNG auto-rickshaws, highly optimized trains, or lightweight gasoline scooters). 
+                Furthermore, we adjust your home energy log calculations to reflect your selected state's reliance on either coal-heavy grids or solar/hydro reserves. 
+                Your weekly goal decreases to <strong>25 kg/week</strong> to reflect India's low-carbon per-capita daily budget averages and help you compete in a fair, realistic regional playground!
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* CARBON TREND ANALYSIS CHART */}
         <div className="bg-white dark:bg-zinc-900 border border-emerald-100 dark:border-zinc-800 p-6 sm:p-8 rounded-3xl shadow-sm space-y-6">
