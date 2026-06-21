@@ -1,0 +1,6 @@
+{
+  "name": "EcoTrack",
+  "description": "Understand, track, and reduce your personal carbon footprint through simple daily actions, regional benchmarks, and personalized AI-driven advice.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

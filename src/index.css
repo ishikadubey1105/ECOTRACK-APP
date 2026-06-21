@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Lora", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-natural-bg: #F9FBF8;
+  --color-natural-accent: #4A6741;
+  --color-natural-deep: #3A4D39;
+  --color-natural-sage: #8BA888;
+  --color-natural-timber: #D4A373;
+  --color-natural-cream: #FDF6F0;
+  --color-natural-[#EED7C1]: #EED7C1;
+}
