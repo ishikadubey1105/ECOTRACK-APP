@@ -7,7 +7,7 @@ import {
   Target, TrendingDown, ArrowRight, CheckCircle2, XCircle, Search, Info,
   Award, Trophy, HelpCircle as QuestionIcon, ShieldCheck, Sun, Moon,
   Lightbulb, Sparkle, AlertTriangle, ZapOff, Check, AlertOctagon, FlameKindling,
-  BookOpen, Bell, Clock
+  BookOpen, Bell, Clock, Share2, Copy, X
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Cell
@@ -339,6 +339,10 @@ export default function App() {
   const [simulatorCarTrips, setSimulatorCarTrips] = useState<number>(3); // trips replaced
   const [simulatorRedMeat, setSimulatorRedMeat] = useState<number>(2); // beef meals avoided
   const [simulatorEcoEnergy, setSimulatorEcoEnergy] = useState<number>(8); // hours of vampire devices unplugged
+
+  // Share Weekly Progress state
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
 
   // Regular input states
   const [freeInput, setFreeInput] = useState('');
@@ -1246,6 +1250,175 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Share Progress Modal */}
+      <AnimatePresence>
+        {isShareModalOpen && (
+          <div 
+            id="share-progress-modal-overlay" 
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setIsShareModalOpen(false);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto"
+          >
+            <motion.div
+              id="share-progress-modal-card"
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden relative"
+            >
+              <div className="p-6 sm:p-8 space-y-6">
+                
+                {/* Header */}
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-400 rounded-2xl shadow-2xs">
+                      <Share2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg sm:text-xl font-bold font-serif text-emerald-950 dark:text-zinc-50">Eco-Progress Snapshot</h3>
+                      <p className="text-[11px] text-zinc-500 font-medium">Broadcast your green journey to inspire others!</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsShareModalOpen(false)}
+                    className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-rose-500 dark:hover:text-rose-400 rounded-lg transition-all cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Styled Preview Snapshot Card */}
+                <div className="p-5 bg-gradient-to-br from-emerald-950 via-[#0b2b1d] to-[#041d13] border border-emerald-500/20 text-white rounded-2xl space-y-4 relative overflow-hidden shadow-md">
+                  <div className="absolute right-[-20px] top-[-20px] w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                  
+                  <div className="flex items-center justify-between border-b border-emerald-500/20 pb-3">
+                    <div className="flex items-center gap-1.5">
+                      <Leaf className="w-4 h-4 text-emerald-400 animate-pulse" />
+                      <span className="text-xs font-mono tracking-wider font-extrabold text-emerald-400 uppercase">My EcoTrack Weekly Report</span>
+                    </div>
+                    <span className="text-[9px] font-mono tracking-widest uppercase bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-300">Level {levelInfo.level}</span>
+                  </div>
+
+                  {/* Primary Grid Metrics */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-emerald-900/20 border border-emerald-500/10 p-3 rounded-xl">
+                      <span className="text-[10px] font-mono uppercase text-emerald-400 block mb-0.5">Carbon Spent</span>
+                      <span className="text-xl font-black text-white">{computedMetrics.thisWeekTotal} kg</span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">Goal Limit: {weeklyGoal} kg</span>
+                    </div>
+
+                    <div className="bg-emerald-900/20 border border-emerald-500/10 p-3 rounded-xl">
+                      <span className="text-[10px] font-mono uppercase text-emerald-400 block mb-0.5">Carbon Avoided</span>
+                      <span className="text-xl font-black text-emerald-300">+{computedMetrics.avoidedTotal} kg</span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">Spent Budget: {Math.round((computedMetrics.thisWeekTotal / weeklyGoal) * 100)}%</span>
+                    </div>
+                  </div>
+
+                  {/* Secondary Details */}
+                  <div className="space-y-2 text-xs border-t border-emerald-500/10 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-350">Weekly Habit Streak:</span>
+                      <span className="font-extrabold text-amber-350">{computedMetrics.streakCount} days active 🔥</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-350">Environmental Title:</span>
+                      <span className="font-extrabold text-[#34d399] uppercase tracking-wide">{levelInfo.name}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-350">Eco Equivalency Status:</span>
+                      <span className="font-bold text-zinc-100">{equivalences.treeAbsorptionDays} Pine-Tree Days 🌲</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Raw Text Summary Box */}
+                <div className="space-y-2">
+                  <span className="text-xs font-mono font-black uppercase text-zinc-400 dark:text-zinc-500">Copy Text Summary</span>
+                  <div className="relative">
+                    <textarea
+                      readOnly
+                      rows={5}
+                      className="w-full p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 rounded-2xl text-xs font-mono leading-relaxed text-zinc-650 dark:text-zinc-300 outline-none resize-none"
+                      value={`🍀 My EcoTrack Weekly Performance Report 🍀
+------------------------------
+📊 Weekly Goal Limit: ${weeklyGoal} kg CO₂e
+📉 Actual Carbon Spent: ${computedMetrics.thisWeekTotal} kg CO₂e
+✅ Saved/Avoided Carbon: ${computedMetrics.avoidedTotal} kg CO₂e
+🔥 Active Logging Streak: ${computedMetrics.streakCount} days
+👑 Title: Level ${levelInfo.level} (${levelInfo.name})
+🌳 Equivalence Impact: Avoided emissions are equal to a young pine tree absorbing CO₂ for ${equivalences.treeAbsorptionDays} days!
+
+Join me on EcoTrack & reduce your daily carbon footprints!`}
+                    />
+                  </div>
+                </div>
+
+                {/* Dialog Interactive Actions */}
+                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <button
+                    onClick={() => {
+                      const text = `🍀 My EcoTrack Weekly Performance Report 🍀
+------------------------------
+📊 Weekly Goal Limit: ${weeklyGoal} kg CO₂e
+📉 Actual Carbon Spent: ${computedMetrics.thisWeekTotal} kg CO₂e
+✅ Saved/Avoided Carbon: ${computedMetrics.avoidedTotal} kg CO₂e
+🔥 Active Logging Streak: ${computedMetrics.streakCount} days
+👑 Title: Level ${levelInfo.level} (${levelInfo.name})
+🌳 Equivalence Impact: Avoided emissions are equal to a young pine tree absorbing CO₂ for ${equivalences.treeAbsorptionDays} days!
+
+Join me on EcoTrack & reduce your daily carbon footprints!`;
+                      navigator.clipboard.writeText(text);
+                      setIsCopied(true);
+                      setTimeout(() => setIsCopied(false), 2000);
+                      playGamificationSound('challenge');
+                    }}
+                    className="flex-1 py-3 px-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-98"
+                  >
+                    {isCopied ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+                    <span>{isCopied ? 'Copied to Clipboard!' : 'Copy Summary'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const text = `🍀 My EcoTrack Weekly Performance Report 🍀
+------------------------------
+📊 Weekly Goal Limit: ${weeklyGoal} kg CO₂e
+📉 Actual Carbon Spent: ${computedMetrics.thisWeekTotal} kg CO₂e
+✅ Saved/Avoided Carbon: ${computedMetrics.avoidedTotal} kg CO₂e
+🔥 Active Logging Streak: ${computedMetrics.streakCount} days
+👑 Title: Level ${levelInfo.level} (${levelInfo.name})
+🌳 Equivalence Impact: Avoided emissions are equal to a young pine tree absorbing CO₂ for ${equivalences.treeAbsorptionDays} days!
+
+Join me on EcoTrack & reduce your daily carbon footprints!`;
+                      const element = document.createElement("a");
+                      const file = new Blob([text], { type: 'text/plain' });
+                      element.href = URL.createObjectURL(file);
+                      element.download = "ecotrack_progress_report.txt";
+                      document.body.appendChild(element);
+                      element.click();
+                      document.body.removeChild(element);
+                      playGamificationSound('challenge');
+                    }}
+                    className="py-3 px-5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 border border-zinc-250 dark:border-zinc-700 dark:hover:bg-zinc-750 text-zinc-850 dark:text-zinc-100 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                  >
+                    <span>Download TXT</span>
+                  </button>
+
+                  <button
+                    onClick={() => setIsShareModalOpen(false)}
+                    className="py-3 px-5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 text-zinc-500 dark:text-zinc-400 rounded-2xl font-extrabold text-xs uppercase tracking-widest cursor-pointer transition-all active:scale-98"
+                  >
+                    Close
+                  </button>
+                </div>
+
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Toast Alert Panels */}
       <AnimatePresence>
         {notification && (
@@ -1653,10 +1826,23 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-3 text-center">
+                <div className="mt-3 text-center flex flex-col items-center gap-2">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400 font-bold">
                     <span className="text-emerald-600 dark:text-emerald-400 font-black">{computedMetrics.thisWeekTotal} kg</span> logged this week / {weeklyGoal} kg CO₂e budget limit
                   </div>
+                  
+                  <button
+                    id="share-progress-button"
+                    onClick={() => {
+                      playGamificationSound('challenge');
+                      setIsShareModalOpen(true);
+                      setIsCopied(false);
+                    }}
+                    className="mt-1 px-4 py-1.5 bg-emerald-100 dark:bg-zinc-800 hover:bg-emerald-200 dark:hover:bg-zinc-750 text-emerald-800 dark:text-emerald-400 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-2 border border-emerald-200/40 dark:border-zinc-700/50 shadow-2xs hover:scale-[1.03] active:scale-[0.97]"
+                  >
+                    <Share2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Share Progress Report</span>
+                  </button>
                 </div>
               </div>
 
